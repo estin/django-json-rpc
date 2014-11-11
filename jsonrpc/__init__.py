@@ -256,7 +256,10 @@ def jsonrpc_method(name, authenticated=False,
       #     request.user = user
       #   return func(request, *args, **kwargs)
     else:
-      _func = func
+      if func_wrapper:
+        _func = func_wrapper(func)
+      else:
+        _func = func
     method, arg_types, return_type = \
       _parse_sig(X['name'], X['arg_names'], validate)
     _func.json_args = X['arg_names']
