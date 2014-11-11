@@ -2,9 +2,21 @@ import re
 from inspect import getargspec
 from functools import wraps
 from django.utils.datastructures import SortedDict
+from django.conf import settings
 from jsonrpc.site import jsonrpc_site
 from jsonrpc.types import *
 from jsonrpc.exceptions import *
+
+
+func_wrapper = getattr(settings, 'JSON_RPC_FUNC_WRAPPER', None)
+if func_wrapper:
+    import importlib
+    def import_func(cl):
+        t = cl.split('.')
+        module, func_name = '.'.join(t[0:-1]), t[-1]
+        return getattr(importlib.import_module(module), func_name)
+    func_wrapper = import_func(func_wrapper)
+
 
 default_site = jsonrpc_site
 KWARG_RE = re.compile(
@@ -32,12 +44,12 @@ def _eval_arg_type(arg_type, T=Any, arg=None, sig=None):
   """
   Returns a type from a snippet of python source. Should normally be
   something just like 'str' or 'Object'.
-  
+
     arg_type      the source to be evaluated
     T             the default type
     arg           context of where this type was extracted
     sig           context from where the arg was extracted
-  
+
   Returns a type or a Type
   """
   try:
@@ -57,10 +69,10 @@ def _parse_sig(sig, arg_names, validate=False):
   Numerically-indexed arguments that do not correspond to an argument
   name in python (ie: it takes a variable number of arguments) will be
   keyed as the stringified version of it's index.
-  
+
     sig         the signature to be parsed
     arg_names   a list of argument names extracted from python source
-  
+
   Returns a tuple of (method name, types dict, return type)
   """
   d = SIG_RE.match(sig)
@@ -92,8 +104,8 @@ def _parse_sig(sig, arg_names, validate=False):
           ret[i] = (ret[i][0], _eval_arg_type(arg, None, arg, sig))
   if not type(ret) is SortedDict:
     ret = SortedDict(ret)
-  return (d['method_name'], 
-          ret, 
+  return (d['method_name'],
+          ret,
           (_eval_arg_type(d['return_sig'], Any, 'return', sig)
             if d['return_sig'] else Any))
 
@@ -102,16 +114,16 @@ def _inject_args(sig, types):
   A function to inject arguments manually into a method signature before
   it's been parsed. If using keyword arguments use 'kw=type' instead in
   the types array.
-    
+
     sig     the string signature
     types   a list of types to be inserted
-    
+
   Returns the altered signature.
   """
   if '(' in sig:
     parts = sig.split('(')
     sig = '%s(%s%s%s' % (
-      parts[0], ', '.join(types), 
+      parts[0], ', '.join(types),
       (', ' if parts[1].index(')') > 0 else ''), parts[1]
     )
   else:
@@ -126,19 +138,19 @@ def jsonrpc_method(name, authenticated=False,
   to the function specific to the JSON-RPC machinery and adds it to the default
   jsonrpc_site if one isn't provided. You must import the module containing
   these functions in your urls.py.
-  
+
     name
-        
+
         The name of your method. IE: `namespace.methodName` The method name
         can include type information, like `ns.method(String, Array) -> Nil`.
 
-    authenticated=False   
+    authenticated=False
 
-        Adds `username` and `password` arguments to the beginning of your 
-        method if the user hasn't already been authenticated. These will 
-        be used to authenticate the user against `django.contrib.authenticate` 
-        If you use HTTP auth or other authentication middleware, `username` 
-        and `password` will not be added, and this method will only check 
+        Adds `username` and `password` arguments to the beginning of your
+        method if the user hasn't already been authenticated. These will
+        be used to authenticate the user against `django.contrib.authenticate`
+        If you use HTTP auth or other authentication middleware, `username`
+        and `password` will not be added, and this method will only check
         against `request.user.is_authenticated`.
 
         You may pass a callable to replace `django.contrib.auth.authenticate`
@@ -147,13 +159,13 @@ def jsonrpc_method(name, authenticated=False,
 
     safe=False
 
-        Designates whether or not your method may be accessed by HTTP GET. 
+        Designates whether or not your method may be accessed by HTTP GET.
         By default this is turned off.
-    
+
     validate=False
 
-        Validates the arguments passed to your method based on type 
-        information provided in the signature. Supply type information by 
+        Validates the arguments passed to your method based on type
+        information provided in the signature. Supply type information by
         including types in your method declaration. Like so:
 
         @jsonrpc_method('myapp.specialSauce(Array, String)', validate=True)
@@ -161,62 +173,88 @@ def jsonrpc_method(name, authenticated=False,
           return SpecialSauce(ingredients, instructions)
 
         Calls to `myapp.specialSauce` will now check each arguments type
-        before calling `special_sauce`, throwing an `InvalidParamsError` 
+        before calling `special_sauce`, throwing an `InvalidParamsError`
         when it encounters a discrepancy. This can significantly reduce the
         amount of code required to write JSON-RPC services.
-    
+
     site=default_site
-        
-        Defines which site the jsonrpc method will be added to. Can be any 
+
+        Defines which site the jsonrpc method will be added to. Can be any
         object that provides a `register(name, func)` method.
-    
+
   """
   def decorator(func):
     arg_names = getargspec(func)[0][1:]
     X = {'name': name, 'arg_names': arg_names}
     if authenticated:
-      if authenticated is True or callable(authenticated):
-        # TODO: this is an assumption
-        X['arg_names'] = authentication_arguments + X['arg_names']
-        X['name'] = _inject_args(X['name'], ('String', 'String'))
-        from django.contrib.auth import authenticate as _authenticate
-        from django.contrib.auth.models import User
-      else:
-        authenticate = authenticated
-      @wraps(func)  
+
       def _func(request, *args, **kwargs):
         user = getattr(request, 'user', None)
         is_authenticated = getattr(user, 'is_authenticated', lambda: False)
-        if ((user is not None 
-              and callable(is_authenticated) and not is_authenticated()) 
-            or user is None):
-          user = None
-          try:
-            creds = args[:len(authentication_arguments)]
-            if len(creds) == 0:
-                raise IndexError
-            # Django's authenticate() method takes arguments as dict
-            user = _authenticate(username=creds[0], password=creds[1], *creds[2:])
-            if user is not None:
-              args = args[len(authentication_arguments):]
-          except IndexError: 
-              auth_kwargs = {}
-              try:
-                for auth_kwarg in authentication_arguments:
-                  auth_kwargs[auth_kwarg] = kwargs[auth_kwarg]
-              except KeyError:
-                raise InvalidParamsError(
-                  'Authenticated methods require at least '
-                  '[%s] or {%s} arguments', authentication_arguments)
+        if not user or not is_authenticated():
+            import importlib
+            from django.conf import settings
+            expt = getattr(
+                settings,
+                'JSON_RPC_FORBIDDEN_EXCEPTION',
+                InvalidCredentialsError,
+            )
+            if isinstance(expt, basestring):
+              def import_class(cl):
+                t = cl.split('.')
+                module, classname = '.'.join(t[0:-1]), t[-1]
+                return getattr(importlib.import_module(module), classname)
+              expt = import_class(expt)()
+            raise expt  # forbidden
 
-              user = _authenticate(**auth_kwargs)
-              if user is not None:
-                for auth_kwarg in authentication_arguments:
-                  kwargs.pop(auth_kwarg)
-          if user is None:
-            raise InvalidCredentialsError
-          request.user = user
+        if func_wrapper:
+            return func_wrapper(func)(request, *args, **kwargs)
+
         return func(request, *args, **kwargs)
+
+      # changed by etatarkin
+      # if authenticated is True or callable(authenticated):
+      #   # TODO: this is an assumption
+      #   X['arg_names'] = authentication_arguments + X['arg_names']
+      #   X['name'] = _inject_args(X['name'], ('String', 'String'))
+      #   from django.contrib.auth import authenticate as _authenticate
+      #   from django.contrib.auth.models import User
+      # else:
+      #   authenticate = authenticated
+      # @wraps(func)
+      # def _func(request, *args, **kwargs):
+      #   user = getattr(request, 'user', None)
+      #   is_authenticated = getattr(user, 'is_authenticated', lambda: False)
+      #   if ((user is not None
+      #         and callable(is_authenticated) and not is_authenticated())
+      #       or user is None):
+      #     user = None
+      #     try:
+      #       creds = args[:len(authentication_arguments)]
+      #       if len(creds) == 0:
+      #           raise IndexError
+      #       # Django's authenticate() method takes arguments as dict
+      #       user = _authenticate(username=creds[0], password=creds[1], *creds[2:])
+      #       if user is not None:
+      #         args = args[len(authentication_arguments):]
+      #     except IndexError:
+      #         auth_kwargs = {}
+      #         try:
+      #           for auth_kwarg in authentication_arguments:
+      #             auth_kwargs[auth_kwarg] = kwargs[auth_kwarg]
+      #         except KeyError:
+      #           raise InvalidParamsError(
+      #             'Authenticated methods require at least '
+      #             '[%s] or {%s} arguments' % authentication_arguments)
+
+      #         user = _authenticate(**auth_kwargs)
+      #         if user is not None:
+      #           for auth_kwarg in authentication_arguments:
+      #             kwargs.pop(auth_kwarg)
+      #     if user is None:
+      #       raise InvalidCredentialsError
+      #     request.user = user
+      #   return func(request, *args, **kwargs)
     else:
       _func = func
     method, arg_types, return_type = \
