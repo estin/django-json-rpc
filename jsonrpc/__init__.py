@@ -1,4 +1,5 @@
 import re
+import importlib
 from inspect import getargspec
 from functools import wraps
 from django.utils.datastructures import SortedDict
@@ -8,17 +9,21 @@ from jsonrpc.types import *
 from jsonrpc.exceptions import *
 
 
+def import_obj(cl):
+    t = cl.split('.')
+    module, obj_name = '.'.join(t[0:-1]), t[-1]
+    return getattr(importlib.import_module(module), obj_name)
+
+
 func_wrapper = getattr(settings, 'JSON_RPC_FUNC_WRAPPER', None)
 if func_wrapper:
-    import importlib
-    def import_func(cl):
-        t = cl.split('.')
-        module, func_name = '.'.join(t[0:-1]), t[-1]
-        return getattr(importlib.import_module(module), func_name)
-    func_wrapper = import_func(func_wrapper)
+   func_wrapper = import_obj(func_wrapper)
 
 
-default_site = jsonrpc_site
+default_site = getattr(settings, 'JSON_RPC_DEFAULT_SITE', jsonrpc_site)
+
+
+
 KWARG_RE = re.compile(
   r'\s*(?P<arg_name>[a-zA-Z0-9_]+)\s*=\s*(?P<arg_type>[a-zA-Z]+)\s*$')
 SIG_RE = re.compile(
@@ -183,6 +188,8 @@ def jsonrpc_method(name, authenticated=False,
         object that provides a `register(name, func)` method.
 
   """
+  if isinstance(site, basestring):
+    site = import_obj(site)
   def decorator(func):
     arg_names = getargspec(func)[0][1:]
     X = {'name': name, 'arg_names': arg_names}
