@@ -193,8 +193,15 @@ def jsonrpc_method(name, authenticated=False,
   if isinstance(site, basestring):
     site = import_obj(site)
   def decorator(func):
-    if 'sphinx-build' in _cmd: 
-      func.__doc__ = "JSON-RPC: **%s** AUTH: **%s**\n\n%s" % (name, authenticated, func.__doc__ or '')
+    if 'sphinx-build' in _cmd:
+      examples = ''
+      examples_factory = getattr(settings, 'JSON_RPC_EXAMPLES_FACTORY', None)
+      if examples_factory:
+          examples = import_obj(examples_factory)(name)
+
+      func.__doc__ = "JSON-RPC: **%s** AUTH: **%s**\n\n%s\n\n%s" % (
+        name, authenticated, func.__doc__ or '', examples or '',
+      )
       return func
     arg_names = getargspec(func)[0][1:]
     X = {'name': name, 'arg_names': arg_names}
