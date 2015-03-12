@@ -1,4 +1,5 @@
 import re
+import sys
 import importlib
 from inspect import getargspec
 from functools import wraps
@@ -22,6 +23,7 @@ if func_wrapper:
 
 default_site = getattr(settings, 'JSON_RPC_DEFAULT_SITE', jsonrpc_site)
 
+_cmd = ' '.join(sys.argv)
 
 
 KWARG_RE = re.compile(
@@ -191,6 +193,9 @@ def jsonrpc_method(name, authenticated=False,
   if isinstance(site, basestring):
     site = import_obj(site)
   def decorator(func):
+    if 'sphinx-build' in _cmd: 
+      func.__doc__ = "JSON-RPC: **%s** AUTH: **%s**\n\n%s" % (name, authenticated, func.__doc__ or '')
+      return func
     arg_names = getargspec(func)[0][1:]
     X = {'name': name, 'arg_names': arg_names}
     if authenticated:
