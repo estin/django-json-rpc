@@ -3,11 +3,13 @@ import sys
 import importlib
 from inspect import getargspec
 from functools import wraps
-from django.utils.datastructures import SortedDict
+from collections import OrderedDict
+# from django.utils.datastructures import SortedDict
 from django.conf import settings
 from jsonrpc.site import jsonrpc_site
 from jsonrpc.types import *
 from jsonrpc.exceptions import *
+
 
 
 def import_obj(cl):
@@ -72,7 +74,7 @@ def _eval_arg_type(arg_type, T=Any, arg=None, sig=None):
 
 def _parse_sig(sig, arg_names, validate=False):
   """
-  Parses signatures into a ``SortedDict`` of paramName => type.
+  Parses signatures into a ``OrderedDict`` of paramName => type.
   Numerically-indexed arguments that do not correspond to an argument
   name in python (ie: it takes a variable number of arguments) will be
   keyed as the stringified version of it's index.
@@ -91,8 +93,8 @@ def _parse_sig(sig, arg_names, validate=False):
     for i, arg in enumerate(d['args_sig'].strip().split(',')):
       _type_checking_available(sig, validate)
       if '=' in arg:
-        if not type(ret) is SortedDict:
-          ret = SortedDict(ret)
+        if not type(ret) is OrderedDict:
+          ret = OrderedDict(ret)
         dk = KWARG_RE.match(arg)
         if not dk:
           raise ValueError('Could not parse arg type %s in %s' % (arg, sig))
@@ -102,15 +104,15 @@ def _parse_sig(sig, arg_names, validate=False):
           raise ValueError('Invalid kwarg value %s in %s' % (arg, sig))
         ret[dk['arg_name']] = _eval_arg_type(dk['arg_type'], None, arg, sig)
       else:
-        if type(ret) is SortedDict:
+        if type(ret) is OrderedDict:
           raise ValueError('Positional arguments must occur '
                            'before keyword arguments in %s' % sig)
         if len(ret) < i + 1:
           ret.append((str(i), _eval_arg_type(arg, None, arg, sig)))
         else:
           ret[i] = (ret[i][0], _eval_arg_type(arg, None, arg, sig))
-  if not type(ret) is SortedDict:
-    ret = SortedDict(ret)
+  if not type(ret) is OrderedDict:
+    ret = OrderedDict(ret)
   return (d['method_name'],
           ret,
           (_eval_arg_type(d['return_sig'], Any, 'return', sig)
@@ -230,50 +232,6 @@ def jsonrpc_method(name, authenticated=False,
             return func_wrapper(func)(request, *args, **kwargs)
 
         return func(request, *args, **kwargs)
-
-      # changed by etatarkin
-      # if authenticated is True or callable(authenticated):
-      #   # TODO: this is an assumption
-      #   X['arg_names'] = authentication_arguments + X['arg_names']
-      #   X['name'] = _inject_args(X['name'], ('String', 'String'))
-      #   from django.contrib.auth import authenticate as _authenticate
-      #   from django.contrib.auth.models import User
-      # else:
-      #   authenticate = authenticated
-      # @wraps(func)
-      # def _func(request, *args, **kwargs):
-      #   user = getattr(request, 'user', None)
-      #   is_authenticated = getattr(user, 'is_authenticated', lambda: False)
-      #   if ((user is not None
-      #         and callable(is_authenticated) and not is_authenticated())
-      #       or user is None):
-      #     user = None
-      #     try:
-      #       creds = args[:len(authentication_arguments)]
-      #       if len(creds) == 0:
-      #           raise IndexError
-      #       # Django's authenticate() method takes arguments as dict
-      #       user = _authenticate(username=creds[0], password=creds[1], *creds[2:])
-      #       if user is not None:
-      #         args = args[len(authentication_arguments):]
-      #     except IndexError:
-      #         auth_kwargs = {}
-      #         try:
-      #           for auth_kwarg in authentication_arguments:
-      #             auth_kwargs[auth_kwarg] = kwargs[auth_kwarg]
-      #         except KeyError:
-      #           raise InvalidParamsError(
-      #             'Authenticated methods require at least '
-      #             '[%s] or {%s} arguments' % authentication_arguments)
-
-      #         user = _authenticate(**auth_kwargs)
-      #         if user is not None:
-      #           for auth_kwarg in authentication_arguments:
-      #             kwargs.pop(auth_kwarg)
-      #     if user is None:
-      #       raise InvalidCredentialsError
-      #     request.user = user
-      #   return func(request, *args, **kwargs)
     else:
       if func_wrapper:
         _func = func_wrapper(func)
