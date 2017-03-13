@@ -201,9 +201,20 @@ def jsonrpc_method(name, authenticated=False,
       if examples_factory:
           examples = import_obj(examples_factory)(name)
 
+      def clean(s):
+        r = [] 
+        for i in s.split('\n'):
+          if i.startswith('    '):
+            r.append(i[4:])
+          else:
+            r.append(i)
+        return '\n'.join(r)
+
       func.__doc__ = "JSON-RPC: **%s** AUTH: **%s**\n\n%s\n\n%s" % (
         name, authenticated,
-        re.sub('^&nbsp{4}', '', (func.__doc__ or '')), examples or '',
+        # re.sub('(^\s{4}){1}', '', (func.__doc__ or ''), flags=re.MULTILINE),
+        clean(func.__doc__ or ''),
+        examples or '',
       )
       return func
     arg_names = getargspec(func)[0][1:]
