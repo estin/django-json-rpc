@@ -203,7 +203,7 @@ def jsonrpc_method(name, authenticated=False,
 
       func.__doc__ = "JSON-RPC: **%s** AUTH: **%s**\n\n%s\n\n%s" % (
         name, authenticated,
-        (func.__doc__ or '').replace('    ', '', 1), examples or '',
+        (func.__doc__ or '').replace('    ', ''), examples or '',
       )
       return func
     arg_names = getargspec(func)[0][1:]
